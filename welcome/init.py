@@ -1,5 +1,4 @@
 import anndata
-from datetime import datetime
 import json
 import math
 import matplotlib.pyplot as plt
@@ -8,33 +7,17 @@ from matplotlib.patches import PathPatch
 from matplotlib.textpath import TextPath
 from matplotlib.transforms import Affine2D
 import numpy as np
-import os
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import re
-import seaborn as sns 
+import seaborn as sns
 import scanpy as sc
-import squidpy as sq
-import tempfile
 
 from anndata import AnnData
 from functools import lru_cache
 from pathlib import Path
-from plotly.graph_objs.layout import Title
 from plotly.subplots import make_subplots
-import scipy.cluster.hierarchy as sch
 from typing import Any, Dict, List, Optional
-
-from latch.account import Account
-from latch.ldata.path import LPath
-from latch.ldata.type import LatchPathError
-from latch.types import LatchDir, LatchFile
-
-from latch_cli.services.launch.launch_v2 import launch, launch_from_launch_plan
-from latch_cli.tinyrequests import post
-from latch_cli.utils import get_auth_header
-from latch_sdk_config.latch import config
 
 from lplots import palettes, submit_widget_state
 from lplots.reactive import Signal
@@ -43,18 +26,13 @@ from lplots.widgets.checkbox import w_checkbox
 from lplots.widgets.column import w_column
 from lplots.widgets.grid import w_grid
 from lplots.widgets.h5 import w_h5
-from lplots.widgets.igv import w_igv, IGVOptions
 from lplots.widgets.ldata import w_ldata_picker
 from lplots.widgets.multiselect import w_multi_select
 from lplots.widgets.plot import w_plot
-from lplots.widgets.radio import w_radio_group
 from lplots.widgets.row import w_row
 from lplots.widgets.select import w_select
 from lplots.widgets.table import w_table
 from lplots.widgets.text import w_text_input, w_text_output
-from lplots.widgets.workflow import w_workflow
-
-from wf import Barcodes, Genome
 
 w_text_output(content="# **AnnData H5AD Viewer**")
 w_text_output(content="""

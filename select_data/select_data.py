@@ -162,7 +162,7 @@ if data_path.value is not None:
   coverages_dict = {}
   archrproj_dir = None
   workspace_account_id = None
-  genome_dict = {"hg38": Genome.hg38, "mm10": Genome.mm10}
+  genome_dict = {}
 
   groupA_cells = []
   groupB_cells = []
