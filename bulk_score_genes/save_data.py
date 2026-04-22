@@ -21,7 +21,7 @@ if gene_score_done_signal.sample() is True:
   save_col_gs = w_column(items=[save_button_gs, save_warning_gs])
 
   if save_button_gs.value:
-      save_path_gs = adata_path if "adata_path" in globals() and adata_path is not None else adata_g_path
+      save_path_gs = adata_path if "adata_path" in globals() and adata_path is not None else None
       if save_path_gs is None:
         w_text_output(
           content="Could not determine the source H5AD path for saving.",

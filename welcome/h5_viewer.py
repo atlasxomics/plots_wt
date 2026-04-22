@@ -52,17 +52,8 @@ if adata_g is None:
     )
     exit()
 
-if "adata_h5" not in globals() or adata_h5 is None:
-    adata_h5 = adata_g
-    loaded_h5_data_key = "adata"
-elif adata_h5 is not adata_g:
-    adata_h5 = adata_g
-    loaded_h5_data_key = "adata"
-elif "loaded_h5_data_key" not in globals():
-    loaded_h5_data_key = "adata"
-
 refresh_h5_signal()
-viewer = w_h5(ann_data=adata_h5)
+w_h5(ann_data=adata_g)
 
 h5_obs_button = w_checkbox(
     label="Display Cell Metadata Table",
@@ -70,8 +61,6 @@ h5_obs_button = w_checkbox(
     default=False,
 )
 
-h5_obs = adata_h5.obs
+h5_obs = adata_g.obs
 if h5_obs_button.value:
-  h5_table = w_table(label="Metadata (adata.obs)", source=h5_obs)
-
-h5_viewer_signal(True)
+  w_table(label="Metadata (adata.obs)", source=h5_obs)

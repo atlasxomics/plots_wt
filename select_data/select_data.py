@@ -36,8 +36,6 @@ if data_path.value is not None:
       exit()
 
   adata_path = data_path.value
-  adata_g_path = adata_path
-  adata_m_path = None
 
   adata_filename = adata_path.name()
   if not adata_filename.endswith(".h5ad"):
@@ -90,7 +88,6 @@ if data_path.value is not None:
 
   # Compatibility alias for tabs that still refer to the primary object as adata_g.
   adata_g = adata
-  adata_m = None
 
   # Normalize common alternate metadata names without requiring them.
   adata = rename_obs_keys(adata)
@@ -100,26 +97,11 @@ if data_path.value is not None:
     if col in adata.obs_keys():
       adata.obs[col] = pd.to_numeric(adata.obs[col], errors="ignore")
 
-  groups = get_groups(adata)
-  for group in groups:
+  for group in get_groups(adata):
       if adata.obs[group].dtype != object:
           adata.obs[group] = adata.obs[group].astype(str)
 
   available_features = list(adata.var_names)
-  available_genes = available_features
-  available_motifs = []
-  available_metadata = tuple(key for key in adata.obs_keys()
-                             if key not in na_keys)
-
-  filtered_groups: dict[str, dict[str, anndata.AnnData]] = {}
-
-  group_options = {
-    group: list(adata.obs[group].dropna().unique())
-    for group in groups
-  }
-  samples = adata.obs["sample"].dropna().unique() if "sample" in adata.obs else []
-  clusters = group_options.get("cluster", [])
-  conditions = group_options.get("condition", [])
 
   missing_recommended = [
     col for col in ["sample", "condition", "cluster"]
@@ -159,43 +141,12 @@ if data_path.value is not None:
   reorder_obs_columns(adata)
   drop_obs_column([adata], col_to_drop="orig.ident")
 
-  coverages_dict = {}
-  archrproj_dir = None
-  workspace_account_id = None
-  genome_dict = {}
-
-  groupA_cells = []
-  groupB_cells = []
-
-  h5data_dict = {
-    "adata": adata
-  }
-
-  adata_h5 = adata
-  loaded_h5_data_key = "adata"
-
-  results_dict = {}
-  feats = ["feature"]
-
   w_text_output(
     content=f"Data successfully loaded: {adata.n_obs} observations x {adata.n_vars} features.",
     appearance={"message_box": "success"}
   )
   submit_widget_state()
 
-  choose_group_signal(False)
-  groupselect_signal(False)
-  barcodes_signal(False)
-  wf_ready_signal(False)
-  wf_exe_signal(False)
-  wf_results_signal(False)
-  wf_bigwigs_signal(False)
-
-  # Other signals ------------------------------------------------------
-  h5_viewer_signal(False)
-  compare_signal(False)
-  heatmap_signal(False)
-  tracks_signal(False)
   choose_subset_signal(False)
   gene_score_done_signal(False)
   refresh_h5_signal(False)
@@ -205,41 +156,8 @@ else:
   # Reset dynamic globals when no data path is selected.
   adata = None
   adata_g = None
-  adata_m = None
   adata_path = None
-  adata_g_path = None
-  adata_m_path = None
-  local_adata_path = None
   available_features = []
-  available_genes = []
-  available_motifs = []
-  samples = []
-  groups = []
-  group_options = {}
-  clusters = []
-  conditions = []
-  available_metadata = ()
-  coverages_dict = {}
-  archrproj_dir = None
-  workspace_account_id = None
-  h5data_dict = {}
-  adata_h5 = None
-  loaded_h5_data_key = None
-  results_dict = {}
-  feats = []
-
-  choose_group_signal(False)
-  groupselect_signal(False)
-  barcodes_signal(False)
-  wf_ready_signal(False)
-  wf_exe_signal(False)
-  wf_results_signal(False)
-  wf_bigwigs_signal(False)
-
-  h5_viewer_signal(False)
-  compare_signal(False)
-  heatmap_signal(False)
-  tracks_signal(False)
   choose_subset_signal(False)
   gene_score_done_signal(False)
   refresh_h5_signal(False)

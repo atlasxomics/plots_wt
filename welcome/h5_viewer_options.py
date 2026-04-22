@@ -9,10 +9,6 @@ if adata_g is None:
     )
     exit()
 
-if "adata_h5" not in globals() or adata_h5 is None:
-    adata_h5 = adata_g
-    loaded_h5_data_key = "adata"
-
 w_text_output(content="""
 H5 Viewer Advanced Options
 <ul>
@@ -98,7 +94,7 @@ with w_grid(columns=2) as h5_grid:
     h5_grid.add(item=save_button, col_span=1)
 
 if save_button.value:
-    save_path = adata_path if "adata_path" in globals() and adata_path is not None else adata_g_path
+    save_path = adata_path if "adata_path" in globals() and adata_path is not None else None
     if save_path is None:
       w_text_output(
         content="Could not determine the source H5AD path for saving.",
@@ -114,7 +110,7 @@ if save_button.value:
     )
     submit_widget_state()
     try:
-      adata_h5.write(save_path.name())
+      adata_g.write(save_path.name())
     except Exception as e:
       w_text_output(
         content=f"Write to disk failed: {e}",
@@ -148,9 +144,6 @@ if save_button.value:
     submit_widget_state()
 
 if h5_button.value:
-
-    adata_h5 = adata_g
-    loaded_h5_data_key = "adata"
 
     if sample_layout_button is not None and sample_layout_button.value:
 
@@ -209,7 +202,7 @@ if h5_button.value:
                     )
 
             if proceed:
-              n_samples = adata_h5.obs["sample"].nunique()
+              n_samples = adata_g.obs["sample"].nunique()
               total_positions = n_rows * n_cols
               if n_samples > total_positions:
                 proceed = False
@@ -222,7 +215,7 @@ if h5_button.value:
                 new_obsm = f"X_dataset_{n_rows}x{n_cols}-{spacing}-{('FlipY' if flipy_val else 'noFlipY')}-{sort_val}"
                 try:
                   process_matrix_layout(
-                      adata_h5,
+                      adata_g,
                       n_rows=n_rows,
                       n_cols=n_cols,
                       tile_spacing=spacing,

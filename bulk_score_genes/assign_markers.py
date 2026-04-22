@@ -11,8 +11,6 @@ new_data_signal()
 current_bulk_score_source_key = None
 if "adata_path" in globals() and adata_path is not None:
     current_bulk_score_source_key = adata_path.path
-elif "adata_g_path" in globals() and adata_g_path is not None:
-    current_bulk_score_source_key = adata_g_path.path
 
 if current_bulk_score_source_key != bulk_score_source_key:
     bulk_score_source_key = current_bulk_score_source_key

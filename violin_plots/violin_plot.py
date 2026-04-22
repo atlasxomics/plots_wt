@@ -39,7 +39,7 @@ numeric_metadata = [
   data for data in get_numeric_obs_keys(adata_g)
   if data in available_metadata
 ]
-feature_options = available_features if "available_features" in globals() else available_genes
+feature_options = available_features if "available_features" in globals() else []
 violin_data_options = list(dict.fromkeys(numeric_metadata + feature_options))
 
 if not violin_groups:
