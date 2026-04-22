@@ -3,16 +3,15 @@ w_text_output(content="""
 # Violin Plot
 
 Generate violin plots to visualize the distribution of values across a selected grouping (e.g., **Clusters**, **Samples**, or **Conditions**).  
-You can display numeric cell-level metrics, gene accessibility values, or motif deviation scores.
+You can display numeric cell-level metrics or feature values from `.X`.
 
-> If both gene and motif `AnnData` objects are available, the data dropdown will include names from both.  
-> Motif names are distinguished by a numeric suffix (e.g., `CTCF-177`).
+> Feature names come from `.var_names`.
 
 """)
 
 new_data_signal()
 
-if not adata_g:
+if adata_g is None:
     w_text_output(
         content="No data selected...",
         appearance={"message_box": "warning"}
@@ -29,34 +28,52 @@ categorical_palette = w_select(
   }
 )
 
-violin_groups = [
-  key for key in adata_g.obs_keys() if
-  pd.api.types.is_object_dtype(adata_g.obs[key]) or pd.api.types.is_categorical_dtype(adata_g.obs[key])
-]
+violin_groups = get_categorical_obs_keys(adata_g)
 
 available_metadata = tuple(
   key for key in adata_g.obs_keys()
   if key not in na_keys
 )
 
-numeric_metadata = [data for data in available_metadata if data not in groups]
+numeric_metadata = [
+  data for data in get_numeric_obs_keys(adata_g)
+  if data in available_metadata
+]
+feature_options = available_features if "available_features" in globals() else available_genes
+violin_data_options = list(dict.fromkeys(numeric_metadata + feature_options))
+
+if not violin_groups:
+  w_text_output(
+    content="No categorical metadata columns available for grouping.",
+    appearance={"message_box": "warning"}
+  )
+  submit_widget_state()
+  exit()
+
+if not violin_data_options:
+  w_text_output(
+    content="No numeric metadata columns or features are available to plot.",
+    appearance={"message_box": "warning"}
+  )
+  submit_widget_state()
+  exit()
 
 violin_data = w_select(
   label="data",
-  default="tsse",
-  options=tuple(numeric_metadata + available_motifs + available_genes),
+  default=choose_default_option(violin_data_options, preferred="tsse"),
+  options=tuple(violin_data_options),
   appearance={
     "help_text": "Select values to plot.",
-    "description": "Motifs are denoted with a numberic suffix ie. CTCT-177."
+    "description": "Metadata columns come from `.obs`; features come from `.var_names`."
   }
 )
 
 violin_group_by = w_select(
   label="group",
-  default="cluster",
+  default=choose_default_option(violin_groups, preferred="cluster"),
   options=tuple(violin_groups),
   appearance={
-    "detail": "(cluster, sample, condition)",
+    "detail": "categorical obs",
     "help_text": "Select group to display on x-axis."
   }
 )
@@ -75,10 +92,8 @@ violin_row = w_row(items=[violin_data, violin_group_by, violin_type, categorical
 data_type = None
 if violin_data.value in numeric_metadata:
   data_type = "obs"
-elif violin_data.value in available_genes:
-  data_type = "gene"
-elif  violin_data.value in available_motifs:
-  data_type = "motif"
+elif violin_data.value in feature_options:
+  data_type = "feature"
 
 if not data_type:
   w_text_output(
@@ -90,7 +105,7 @@ if not data_type:
 
 if data_type is not None:
 
-  v_adata = adata_m if data_type == "motif" else adata_g
+  v_adata = adata_g
   group_col = violin_group_by.value
   
   try:
@@ -100,32 +115,12 @@ if data_type is not None:
   except KeyError:
       w_text_output(
           content=(
-              f"Could not find {group_col} in the {data_type} object; "
-              "syncing gene and motif objects..."
+              f"Could not find {group_col} in the AnnData object."
           ),
-          appearance={"message_box": "info"},
+          appearance={"message_box": "warning"},
       )
       submit_widget_state()
-  
-      sync_obs_metadata(adata_g, adata_m, reconcile_shared=False)
-  
-      # Rebind defensively (helps readability / future changes)
-      v_adata = adata_m if data_type == "motif" else adata_g
-  
-      try:
-          violin_df = create_violin_data(
-              v_adata, group_col, violin_data.value, data_type=data_type
-          )
-      except KeyError:
-          w_text_output(
-              content=(
-                  f"Still could not find {group_col} in the {data_type} object. "
-                  "Please add the annotation to the desired object in the H5 Viewer "
-                  "or contact support."
-              ),
-              appearance={"message_box": "warning"},
-          )
-          submit_widget_state()
+      exit()
 
   if violin_type.value == "box":
     violin_categories = sort_group_categories(violin_df['group'].unique().tolist())

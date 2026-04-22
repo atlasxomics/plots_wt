@@ -10,7 +10,7 @@ The **y-axis** can be displayed as either raw counts or proportions of cells.
 """)
 
 # Abort if no data loaded
-if not adata_g:
+if adata_g is None:
     w_text_output(
         content="No data loaded…",
         appearance={"message_box": "warning"}
@@ -28,27 +28,39 @@ categorical_palette = w_select(
     }
 )
 
-prop_groups = [
-  key for key in adata_g.obs_keys() if
-  pd.api.types.is_object_dtype(adata_g.obs[key]) or pd.api.types.is_categorical_dtype(adata_g.obs[key])
-]
+prop_groups = get_categorical_obs_keys(adata_g)
+
+if not prop_groups:
+    w_text_output(
+        content="No categorical metadata columns available for proportion plotting.",
+        appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+    exit()
+
+default_group_by = choose_default_option(prop_groups, preferred="sample")
+default_stack_by = choose_default_option(
+    prop_groups,
+    preferred="cluster",
+    fallback=next((group for group in prop_groups if group != default_group_by), None),
+)
 
 group_by = w_select(
     label="group by",
-    default="sample",
+    default=default_group_by,
     options=tuple(prop_groups),
     appearance={
-        "detail": "(cluster, sample, condition)",
+        "detail": "categorical obs",
         "help_text": "Select group to display on x-axis."
     }
 )
 
 stack_by = w_select(
     label="stack by",
-    default="cluster",
+    default=default_stack_by,
     options=tuple(prop_groups),
     appearance={
-        "detail": "(cluster, sample, condition)",
+        "detail": "categorical obs",
         "help_text": "Select group to stack the bars by."
     }
 )

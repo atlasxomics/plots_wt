@@ -56,10 +56,10 @@ from lplots.widgets.workflow import w_workflow
 
 from wf import Barcodes, Genome
 
-w_text_output(content="# **ATX Spatial Epigenomics Report**")
+w_text_output(content="# **AnnData H5AD Viewer**")
 w_text_output(content="""
 
-This notebook provides interactive tools for **exploratory data analysis** and **figure generation** from spatial epigenomic DBiT-seq experiments. Plotting modules are organized into tabs at the **top of this window**--move between tabs to explore results.
+This notebook provides interactive tools for **exploratory data analysis** and **figure generation** from AnnData `.h5ad` files. Plotting modules are organized into tabs at the **top of this window**--move between tabs to explore results.
 
 """)
 
@@ -133,6 +133,7 @@ all_colors = (
     "Alphabet", "Dark24", "Light24"
 )
 
+adata = None
 adata_g = None
 adata_m = None
 
@@ -198,10 +199,13 @@ def convert_feature_expression(anndata, feature_name):
     """Create a new column in .obs with feature value from .X.
     """
     try:
-        feature_value = anndata[:, feature_name].X.flatten()
+        feature_matrix = anndata[:, feature_name].X
+        if hasattr(feature_matrix, "toarray"):
+            feature_matrix = feature_matrix.toarray()
+        feature_value = np.asarray(feature_matrix).ravel()
         anndata.obs[feature_name] = list(feature_value)
     except KeyError as e:
-        print(f"Error {e}: No gene {feature_name} found in .var_names")
+        print(f"Error {e}: No feature {feature_name} found in .var_names")
 
 
 def create_proportion_dataframe(
@@ -237,7 +241,7 @@ def create_proportion_dataframe(
 def create_violin_data(adata, group_by, plot_data, data_type="obs"):
     """Create a DataFrame from an AnnData object to be used for violin plots;
     returns pandas DataFrame with columns: 'group', 'value', and 'type'
-    (either 'obs' or 'gene').
+    (either 'obs' or feature values from '.X').
     """
 
     # Check if the data to plot is from .obs
@@ -250,11 +254,14 @@ def create_violin_data(adata, group_by, plot_data, data_type="obs"):
             'value': values
         })
 
-    # Check if the data to plot is gene expression from .X
-    elif data_type in ["gene", "motif"]:
+    # Check if the data to plot is a feature from .X
+    elif data_type in ["gene", "motif", "feature"]:
 
-        # Extract gene expression values for the gene
-        values = adata[:, plot_data].X.flatten()
+        # Extract feature values.
+        feature_matrix = adata[:, plot_data].X
+        if hasattr(feature_matrix, "toarray"):
+            feature_matrix = feature_matrix.toarray()
+        values = np.asarray(feature_matrix).ravel()
 
         df = pd.DataFrame({
             "group": adata.obs[group_by],
@@ -262,7 +269,7 @@ def create_violin_data(adata, group_by, plot_data, data_type="obs"):
         })
 
     else:
-        raise ValueError("data_type must be either 'obs', 'gene', or 'motif'.")
+        raise ValueError("data_type must be either 'obs', 'gene', 'motif', or 'feature'.")
 
     return df
 
@@ -725,6 +732,36 @@ def get_groups(adata: anndata.AnnData) -> List[str]:
             groups.append(group)
 
     return groups
+
+
+def get_categorical_obs_keys(adata: anndata.AnnData) -> List[str]:
+    """Return obs columns suitable for grouping/filtering widgets."""
+    return [
+        key for key in adata.obs_keys()
+        if (
+            pd.api.types.is_object_dtype(adata.obs[key])
+            or pd.api.types.is_categorical_dtype(adata.obs[key])
+            or pd.api.types.is_bool_dtype(adata.obs[key])
+        )
+    ]
+
+
+def get_numeric_obs_keys(adata: anndata.AnnData) -> List[str]:
+    """Return numeric obs columns suitable for continuous plots."""
+    return [
+        key for key in adata.obs_keys()
+        if pd.api.types.is_numeric_dtype(adata.obs[key])
+    ]
+
+
+def choose_default_option(options, preferred=None, fallback=None):
+    """Choose a stable widget default from available options."""
+    options = list(options or [])
+    if preferred in options:
+        return preferred
+    if fallback in options:
+        return fallback
+    return options[0] if options else None
 
 
 def get_top_n_heatmap(df, rank_by="scores", n_top=5):
@@ -2054,11 +2091,6 @@ def rename_obs_keys(adata: anndata.AnnData) -> anndata.AnnData:
                     f"Target key '{dest}' already exists in obs; skipping \
                     copy from '{src}'."
                 )
-        else:
-            print(
-                f"Source key '{src}' not found in obs; cannot copy to \
-                '{dest}'."
-            )
 
     return adata
 
@@ -2074,6 +2106,8 @@ def rgb_to_hex(rgb):
 
 def reorder_obs_columns(adata, first_col="cluster"):
     """Move specified column to first position in obs DataFrame."""
+    if first_col not in adata.obs.columns:
+        return
     new_order = [first_col] + [c for c in adata.obs.columns if c != first_col]
     adata.obs = adata.obs[new_order]
 

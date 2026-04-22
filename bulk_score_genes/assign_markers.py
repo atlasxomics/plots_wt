@@ -9,17 +9,19 @@ if "bulk_score_source_key" not in globals():
 
 new_data_signal()
 current_bulk_score_source_key = None
-if "adata_g_path" in globals() and adata_g_path is not None:
+if "adata_path" in globals() and adata_path is not None:
+    current_bulk_score_source_key = adata_path.path
+elif "adata_g_path" in globals() and adata_g_path is not None:
     current_bulk_score_source_key = adata_g_path.path
 
 if current_bulk_score_source_key != bulk_score_source_key:
     bulk_score_source_key = current_bulk_score_source_key
     gene_score_done_signal(False)
     choose_subset_signal(False)
-# Ensure gene activity AnnData is loaded
-if not adata_g or not isinstance(adata_g, AnnData):
+# Ensure AnnData is loaded
+if adata_g is None or not isinstance(adata_g, AnnData):
     w_text_output(
-        content="No gene activity data loaded...",
+        content="No AnnData object loaded...",
         appearance={"message_box": "warning"}
     )
     exit()
@@ -55,9 +57,8 @@ if subset_button.value:
   """)
 
   filter_groups = [
-    key for key in adata_g.obs_keys() if
-    (pd.api.types.is_object_dtype(adata_g.obs[key]) or pd.api.types.is_categorical_dtype(adata_g.obs[key]))
-    and key != "cluster"
+    key for key in get_categorical_obs_keys(adata_g)
+    if key != "cluster"
   ]
   filter_groups = filter_groups + ["None"]
   
@@ -134,7 +135,7 @@ for idx in range(n_types):
     feature_select = w_multi_select(
         label=f"Select features for cell type {idx+1}",
         options=tuple(adata_g.var_names),
-        appearance={"help_text": "Choose one or more genes for this cell type"},
+        appearance={"help_text": "Choose one or more features for this cell type"},
         key=f"Select features for cell type {idx+1}"
     )
     label_inputs.append(label_input)

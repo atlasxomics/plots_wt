@@ -3,7 +3,7 @@ if "gene_score_done_signal" not in globals():
   gene_score_done_signal = Signal(False)
 gene_score_done_signal()
 
-if not adata_g or not isinstance(adata_g, AnnData):
+if adata_g is None or not isinstance(adata_g, AnnData):
   w_text_output(content=" ")
   exit()
 
@@ -22,10 +22,7 @@ available_score_cols = [
     if col in adata_g.obs.columns
   ]
 
-categorical_obs = [
-  key for key in adata_g.obs_keys()
-  if pd.api.types.is_object_dtype(adata_g.obs[key]) or pd.api.types.is_categorical_dtype(adata_g.obs[key])
-]
+categorical_obs = get_categorical_obs_keys(adata_g)
 
 if not categorical_obs:
   w_text_output(
@@ -58,7 +55,7 @@ score_select = w_multi_select(
 
 group_select_gs = w_select(
     label="Group by metadata column",
-    default="cluster",
+    default=choose_default_option(categorical_obs, preferred="cluster"),
     options=tuple(categorical_obs),
     appearance={"help_text": "Select a categorical obs column to aggregate scores by."},
     key="score_heatmap_group"

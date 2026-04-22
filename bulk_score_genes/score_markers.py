@@ -1,6 +1,6 @@
 new_data_signal()
 
-if not adata_g:
+if adata_g is None:
   w_text_output(content="   ")
   exit()
 
@@ -28,7 +28,7 @@ if choose_subset_signal.sample():
               marker_dict[lbl] = feats
   
       w_text_output(
-          content=f"Constructed cell type-gene set dictionary: {marker_dict}",
+          content=f"Constructed cell type-feature set dictionary: {marker_dict}",
           appearance={"message_box": "info"}
       )
       submit_widget_state()
@@ -37,7 +37,7 @@ if choose_subset_signal.sample():
       for cell_type, genes in marker_dict.items():
           valid_genes = [g for g in genes if g in adata_subset.var_names]
           w_text_output(
-              content=f"Starting gene scoring for {cell_type}...",
+              content=f"Starting feature scoring for {cell_type}...",
               appearance={"message_box": "info"}
           )
           if len(valid_genes) > 0:
@@ -49,13 +49,13 @@ if choose_subset_signal.sample():
                     score_name=f"{cell_type}_score"
                 )
                 w_text_output(
-                    content=f"Gene scoring finished for {cell_type}.",
+                    content=f"Feature scoring finished for {cell_type}.",
                     appearance={"message_box": "success"}
                 )
                 submit_widget_state()
             else:
                 w_text_output(
-                    content=f"Cell type {cell_type} contains no valid genes.",
+                    content=f"Cell type {cell_type} contains no valid features.",
                     appearance={"message_box": "warning"}
                 )
 
@@ -73,7 +73,6 @@ if choose_subset_signal.sample():
           submit_widget_state()
           scores = adata_subset.obs[score_cols].to_numpy()
           best_idx = np.argmax(scores, axis=1)
-          print(best_idx)
           best_types = np.array(score_cols)[best_idx]
           adata_subset.obs["pred_cell_type"] = [
               bt.replace("_score", "") for bt in best_types

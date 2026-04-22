@@ -9,17 +9,17 @@ Once initialized, the viewer will display your project cells plotted in UMAP spa
 ## Navigating the Viewer
 - **Change coordinates:**
   - `X_umap`: UMAP coordinates
-  - `X_dataset`: samples arranged in spatial layout
-  - `spatial`: *not recommended* (overlays all samples at once)
+  - `X_dataset`: samples arranged in spatial layout, when `sample` and `spatial` are available
+  - `spatial`: raw spatial coordinates, when present
 - **Coloring cells:**
   - In the left panel, click the **paint bucket** icon next to any annotation to color by that variable.
-  - In the *Genes of Interest* section (bottom of left panel), click **+**, type a gene name, select it, and click **Add**. Then click the paint bucket icon next to the feature to color cells by that gene or motif.
+  - In the *Genes of Interest* section (bottom of left panel), click **+**, type a feature name, select it, and click **Add**. Then click the paint bucket icon next to the feature to color cells by that value.
 
 ---
 
-## Selecting Cells for the Compare Clusters Workflow
+## Selecting Cells
 
-The H5 Viewer can be used to create custom annotations in the AnnData object. These annotations can then be used as input to the **Compare Clusters Workflow**.
+The H5 Viewer can be used to create custom annotations in the AnnData object.
 
 - **Add a new annotation:**  
   In the left panel, click the **+** next to either *Continuous* or *Categorical* observations.
@@ -45,7 +45,7 @@ The H5 Viewer can be used to create custom annotations in the AnnData object. Th
 """)
 
 new_data_signal()
-if not adata_g:
+if adata_g is None:
     w_text_output(
         content="No data loaded…",
         appearance={"message_box": "warning"}
@@ -54,15 +54,12 @@ if not adata_g:
 
 if "adata_h5" not in globals() or adata_h5 is None:
     adata_h5 = adata_g
-    loaded_h5_data_key = "gene"
-elif adata_h5 is not adata_g and adata_h5 is not adata_m:
+    loaded_h5_data_key = "adata"
+elif adata_h5 is not adata_g:
     adata_h5 = adata_g
-    loaded_h5_data_key = "gene"
+    loaded_h5_data_key = "adata"
 elif "loaded_h5_data_key" not in globals():
-    if adata_h5 is adata_m:
-        loaded_h5_data_key = "motif"
-    else:
-        loaded_h5_data_key = "gene"
+    loaded_h5_data_key = "adata"
 
 refresh_h5_signal()
 viewer = w_h5(ann_data=adata_h5)
