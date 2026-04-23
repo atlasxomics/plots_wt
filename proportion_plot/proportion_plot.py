@@ -41,6 +41,17 @@ if not prop_groups:
     submit_widget_state()
     exit()
 
+if len(prop_groups) < 2:
+    w_text_output(
+        content=(
+            "Proportion plotting requires at least two low-cardinality "
+            "categorical metadata columns."
+        ),
+        appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+    exit()
+
 default_group_by = choose_group_default(
     prop_groups,
     preferred=("condition", "sample", "cluster"),
@@ -50,6 +61,17 @@ default_stack_by = choose_group_default(
     preferred=("cluster", "condition", "sample"),
     fallback=next((group for group in prop_groups if group != default_group_by), None),
 )
+
+if default_group_by is None or default_stack_by is None:
+    w_text_output(
+        content=(
+            "Could not determine valid default grouping columns for the "
+            "proportion plot."
+        ),
+        appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+    exit()
 
 group_by = w_select(
     label="group by",

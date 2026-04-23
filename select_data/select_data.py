@@ -93,6 +93,14 @@ if data_path.value is not None:
   adata = rename_obs_keys(adata)
   adata_g = adata
 
+  orientation_warnings = check_anndata_orientation(adata)
+  for warning in orientation_warnings:
+    w_text_output(
+      content=warning,
+      appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+
   for col in ["n_fragment", "n_counts", "total_counts"]:
     if col in adata.obs_keys():
       adata.obs[col] = pd.to_numeric(adata.obs[col], errors="ignore")
@@ -115,6 +123,24 @@ if data_path.value is not None:
         + ". Some default groupings will use other available metadata columns."
       ),
       appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+
+  excluded_group_cols = get_excluded_groupable_obs_keys(adata)
+  if excluded_group_cols:
+    preview_cols = excluded_group_cols[:10]
+    remaining_count = len(excluded_group_cols) - len(preview_cols)
+    message = (
+      "Excluded high-cardinality or ID-like obs column(s) from grouping "
+      "controls: "
+      + ", ".join(preview_cols)
+    )
+    if remaining_count > 0:
+      message += f", and {remaining_count} more"
+    message += "."
+    w_text_output(
+      content=message,
+      appearance={"message_box": "info"}
     )
     submit_widget_state()
 

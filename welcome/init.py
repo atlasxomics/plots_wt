@@ -40,6 +40,54 @@ DEFAULT_H5_CATEGORICAL_PALETTE = [
 DEFAULT_CATEGORICAL_PALETTE_NAME = "Default H5 Viewer Palette"
 DEFAULT_CONTINUOUS_PALETTE = "PuBu_r"
 DEFAULT_CONTINUOUS_PALETTE_NAME = "Default Continuous Palette"
+MAX_DEFAULT_CATEGORIES = 30
+MAX_PLOT_CATEGORIES = 100
+OBS_ID_KEYWORDS = (
+    "barcode",
+    "barcodes",
+    "cell_id",
+    "cellid",
+    "cell_name",
+    "cellname",
+    "spot_id",
+    "spotid",
+    "uuid",
+)
+CELL_ID_INDEX_KEYWORDS = ("barcode", "cell", "spot", "aaac", "tttg")
+OBS_METADATA_HINTS = ("sample", "condition", "cluster")
+VAR_FEATURE_HINTS = (
+    "gene",
+    "gene_id",
+    "gene_ids",
+    "gene_name",
+    "gene_names",
+    "gene_symbol",
+    "gene_symbols",
+    "feature",
+    "feature_name",
+    "feature_names",
+    "symbol",
+)
+GENE_NAME_PREFIXES = ("ENSG", "ENSMUSG", "ENSGALG", "LOC", "MIR", "RPL", "RPS")
+KNOWN_GENE_NAMES = {
+    "ACTB",
+    "GAPDH",
+    "MALAT1",
+    "B2M",
+    "TPT1",
+    "ACTG1",
+    "EEF1A1",
+    "FTL",
+    "FTH1",
+    "RPLP0",
+    "RPS18",
+    "MS4A1",
+    "CD3D",
+    "CD3E",
+    "LYZ",
+    "PPBP",
+    "NKG7",
+}
 
 
 # Globals ------------------------------------------------------------------
@@ -198,7 +246,7 @@ def get_groups(adata: anndata.AnnData) -> List[str]:
 
 
 def get_categorical_obs_keys(adata: anndata.AnnData) -> List[str]:
-    """Return obs columns suitable for grouping/filtering widgets."""
+    """Return all categorical-like obs columns."""
     return [
         key for key in adata.obs_keys()
         if (
@@ -206,6 +254,56 @@ def get_categorical_obs_keys(adata: anndata.AnnData) -> List[str]:
             or pd.api.types.is_categorical_dtype(adata.obs[key])
             or pd.api.types.is_bool_dtype(adata.obs[key])
         )
+    ]
+
+
+def get_obs_category_summary(adata: anndata.AnnData) -> List[dict]:
+    """Summarize categorical obs columns for plot usability."""
+    summary = []
+    for key in get_categorical_obs_keys(adata):
+        values = adata.obs[key].dropna()
+        n_unique = int(values.nunique())
+        key_lower = key.lower()
+        is_id_like = any(token in key_lower for token in OBS_ID_KEYWORDS)
+        default_ok = (
+            not is_id_like
+            and 2 <= n_unique <= MAX_DEFAULT_CATEGORIES
+        )
+        plot_ok = (
+            not is_id_like
+            and 2 <= n_unique <= MAX_PLOT_CATEGORIES
+        )
+
+        summary.append({
+            "key": key,
+            "n_unique": n_unique,
+            "is_id_like": is_id_like,
+            "default_ok": default_ok,
+            "plot_ok": plot_ok,
+        })
+
+    return summary
+
+
+def get_groupable_obs_keys(
+    adata: anndata.AnnData,
+    *,
+    max_categories: int = MAX_PLOT_CATEGORIES,
+) -> List[str]:
+    """Return categorical obs columns that should be safe to plot/group by."""
+    return [
+        row["key"]
+        for row in get_obs_category_summary(adata)
+        if row["plot_ok"] and row["n_unique"] <= max_categories
+    ]
+
+
+def get_excluded_groupable_obs_keys(adata: anndata.AnnData) -> List[str]:
+    """Return categorical obs columns hidden from grouping controls."""
+    return [
+        f"{row['key']} ({row['n_unique']} categories)"
+        for row in get_obs_category_summary(adata)
+        if not row["plot_ok"]
     ]
 
 
@@ -217,11 +315,107 @@ def get_numeric_obs_keys(adata: anndata.AnnData) -> List[str]:
     ]
 
 
+def _sample_index_values(index, n=200) -> List[str]:
+    if len(index) == 0:
+        return []
+    sample_size = min(n, len(index))
+    positions = np.linspace(0, len(index) - 1, sample_size, dtype=int)
+    return [str(index[i]) for i in positions]
+
+
+def _fraction_matching(values, predicate) -> float:
+    if not values:
+        return 0.0
+    return sum(1 for value in values if predicate(value)) / len(values)
+
+
+def _looks_like_cell_id(value: str) -> bool:
+    value_upper = value.upper()
+    value_lower = value.lower()
+    if any(token in value_lower for token in CELL_ID_INDEX_KEYWORDS):
+        return True
+    if "-" in value and len(value) >= 10:
+        return True
+    if len(value) >= 12 and value_upper == value and any(c.isdigit() for c in value):
+        return True
+    return False
+
+
+def _looks_like_gene_name(value: str) -> bool:
+    value_upper = value.upper()
+    if value_upper in KNOWN_GENE_NAMES:
+        return True
+    return any(value_upper.startswith(prefix) for prefix in GENE_NAME_PREFIXES)
+
+
+def check_anndata_orientation(adata: anndata.AnnData) -> List[str]:
+    """Return non-fatal warnings when an AnnData object may be transposed."""
+    obs_cols = set(adata.obs_keys())
+    var_cols = set(adata.var_keys())
+    obs_hints = [key for key in OBS_METADATA_HINTS if key in obs_cols]
+    var_obs_hints = [key for key in OBS_METADATA_HINTS if key in var_cols]
+    var_feature_hints = [key for key in VAR_FEATURE_HINTS if key in var_cols]
+    obs_feature_hints = [key for key in VAR_FEATURE_HINTS if key in obs_cols]
+
+    obs_name_sample = _sample_index_values(adata.obs_names)
+    var_name_sample = _sample_index_values(adata.var_names)
+    obs_gene_fraction = _fraction_matching(obs_name_sample, _looks_like_gene_name)
+    var_cell_fraction = _fraction_matching(var_name_sample, _looks_like_cell_id)
+    obs_cell_fraction = _fraction_matching(obs_name_sample, _looks_like_cell_id)
+    var_gene_fraction = _fraction_matching(var_name_sample, _looks_like_gene_name)
+
+    evidence = []
+    if var_obs_hints and not obs_hints:
+        evidence.append(
+            "expected cell metadata columns found in `.var` instead of `.obs`: "
+            + ", ".join(var_obs_hints)
+        )
+    if obs_feature_hints and not var_feature_hints:
+        evidence.append(
+            "feature annotation columns found in `.obs` instead of `.var`: "
+            + ", ".join(obs_feature_hints)
+        )
+    if obs_gene_fraction >= 0.25 and var_cell_fraction >= 0.25:
+        evidence.append(
+            "observation names look gene-like while variable names look cell/barcode-like"
+        )
+    elif var_cell_fraction >= 0.5 and obs_cell_fraction < 0.1:
+        evidence.append("variable names look cell/barcode-like")
+    elif obs_gene_fraction >= 0.5 and var_gene_fraction < 0.1:
+        evidence.append("observation names look gene-like")
+
+    if not evidence:
+        return []
+
+    return [
+        "This AnnData object may be transposed (genes in `.obs` and cells in `.var`). "
+        + "Evidence: "
+        + "; ".join(evidence)
+        + ". Downstream plots will still run on the loaded orientation, but "
+        + "feature plots and gene scoring may not behave as expected."
+    ]
+
+
 def choose_default_option(options, preferred=None, fallback=None):
     """Choose a stable widget default from available options."""
     options = list(options or [])
     if preferred in options:
         return preferred
+    if fallback in options:
+        return fallback
+    return options[0] if options else None
+
+
+def choose_group_default(
+    options,
+    preferred=("cluster", "condition", "sample"),
+    fallback=None,
+):
+    """Choose a grouping default from cardinality-filtered obs options."""
+    options = list(options or [])
+    for key in preferred:
+        if key in options:
+            return key
     if fallback in options:
         return fallback
     return options[0] if options else None
