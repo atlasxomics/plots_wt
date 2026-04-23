@@ -55,7 +55,7 @@ if subset_button.value:
   """)
 
   filter_groups = [
-    key for key in get_categorical_obs_keys(adata_g)
+    key for key in get_groupable_obs_keys(adata_g)
     if key != "cluster"
   ]
   filter_groups = filter_groups + ["None"]

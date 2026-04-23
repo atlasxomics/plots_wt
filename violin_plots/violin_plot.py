@@ -28,7 +28,7 @@ categorical_palette = w_select(
   }
 )
 
-violin_groups = get_categorical_obs_keys(adata_g)
+violin_groups = get_groupable_obs_keys(adata_g)
 
 available_metadata = tuple(
   key for key in adata_g.obs_keys()
@@ -44,7 +44,7 @@ violin_data_options = list(dict.fromkeys(numeric_metadata + feature_options))
 
 if not violin_groups:
   w_text_output(
-    content="No categorical metadata columns available for grouping.",
+    content="No low-cardinality categorical metadata columns are available for grouping.",
     appearance={"message_box": "warning"}
   )
   submit_widget_state()
@@ -70,7 +70,10 @@ violin_data = w_select(
 
 violin_group_by = w_select(
   label="group",
-  default=choose_default_option(violin_groups, preferred="cluster"),
+  default=choose_group_default(
+    violin_groups,
+    preferred=("cluster", "condition", "sample"),
+  ),
   options=tuple(violin_groups),
   appearance={
     "detail": "categorical obs",

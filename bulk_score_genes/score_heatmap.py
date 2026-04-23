@@ -22,11 +22,11 @@ available_score_cols = [
     if col in adata_g.obs.columns
   ]
 
-categorical_obs = get_categorical_obs_keys(adata_g)
+categorical_obs = get_groupable_obs_keys(adata_g)
 
 if not categorical_obs:
   w_text_output(
-      content="No categorical metadata columns available to group by.",
+      content="No low-cardinality categorical metadata columns are available to group by.",
       appearance={"message_box": "warning"}
   )
   exit()
@@ -55,7 +55,10 @@ score_select = w_multi_select(
 
 group_select_gs = w_select(
     label="Group by metadata column",
-    default=choose_default_option(categorical_obs, preferred="cluster"),
+    default=choose_group_default(
+        categorical_obs,
+        preferred=("cluster", "condition", "sample"),
+    ),
     options=tuple(categorical_obs),
     appearance={"help_text": "Select a categorical obs column to aggregate scores by."},
     key="score_heatmap_group"

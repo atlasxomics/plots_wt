@@ -28,20 +28,26 @@ categorical_palette = w_select(
     }
 )
 
-prop_groups = get_categorical_obs_keys(adata_g)
+prop_groups = get_groupable_obs_keys(adata_g)
 
 if not prop_groups:
     w_text_output(
-        content="No categorical metadata columns available for proportion plotting.",
+        content=(
+            "No low-cardinality categorical metadata columns are available "
+            "for proportion plotting."
+        ),
         appearance={"message_box": "warning"}
     )
     submit_widget_state()
     exit()
 
-default_group_by = choose_default_option(prop_groups, preferred="sample")
-default_stack_by = choose_default_option(
+default_group_by = choose_group_default(
     prop_groups,
-    preferred="cluster",
+    preferred=("condition", "sample", "cluster"),
+)
+default_stack_by = choose_group_default(
+    [group for group in prop_groups if group != default_group_by],
+    preferred=("cluster", "condition", "sample"),
     fallback=next((group for group in prop_groups if group != default_group_by), None),
 )
 
