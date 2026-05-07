@@ -4,8 +4,8 @@ w_text_output(content="""
 
 # Cluster Marker Heatmap
 
-Display the marker-gene heatmap stored in optimized whole-transcriptome
-`combined.h5ad` files.
+Create a marker-gene heatmap from cluster DEG results stored in optimized
+whole-transcriptome `combined.h5ad` files.
 
 """)
 
@@ -17,48 +17,10 @@ if adata_g is None or not isinstance(adata_g, AnnData):
     submit_widget_state()
     exit()
 
+deg_key = "cluster_marker_degs"
+deg_params_key = "cluster_marker_degs_params"
 heatmap_key = "cluster_marker_heatmap"
 heatmap_params_key = "cluster_marker_heatmap_params"
-
-if heatmap_key not in adata_g.uns:
-    w_text_output(
-        content=(
-            "No cluster marker heatmap was found in this AnnData object. "
-            f"Expected `adata.uns['{heatmap_key}']`, which is added by "
-            "`optimize_wt` when cluster marker computation succeeds."
-        ),
-        appearance={"message_box": "warning"}
-    )
-    submit_widget_state()
-    exit()
-
-raw_heatmap = adata_g.uns[heatmap_key]
-
-try:
-    if isinstance(raw_heatmap, pd.DataFrame):
-        marker_heatmap_df = raw_heatmap.copy()
-    else:
-        marker_heatmap_df = pd.DataFrame(raw_heatmap)
-except Exception as e:
-    w_text_output(
-        content=f"Could not convert `adata.uns['{heatmap_key}']` to a table: {e}",
-        appearance={"message_box": "danger"}
-    )
-    submit_widget_state()
-    exit()
-
-marker_heatmap_df = marker_heatmap_df.apply(pd.to_numeric, errors="coerce")
-marker_heatmap_df = marker_heatmap_df.dropna(axis=0, how="all").dropna(axis=1, how="all")
-marker_heatmap_df.index = marker_heatmap_df.index.map(str)
-marker_heatmap_df.columns = marker_heatmap_df.columns.map(str)
-
-if marker_heatmap_df.empty:
-    w_text_output(
-        content=f"`adata.uns['{heatmap_key}']` is empty after removing missing values.",
-        appearance={"message_box": "warning"}
-    )
-    submit_widget_state()
-    exit()
 
 notebook_palettes = await get_notebook_palettes()
 
@@ -76,26 +38,142 @@ hm_palette = w_select(
     }
 )
 
-show_table = w_checkbox(
-    key="cluster_marker_heatmap_table",
-    label="Display heatmap data table",
-    default=False,
+heatmap_params = adata_g.uns.get(heatmap_params_key, {})
+deg_params = adata_g.uns.get(deg_params_key, {})
+default_top_n = 50
+if isinstance(heatmap_params, dict) and heatmap_params.get("marker_top_n") is not None:
+    default_top_n = int(heatmap_params.get("marker_top_n"))
+elif isinstance(deg_params, dict) and deg_params.get("marker_top_n") is not None:
+    default_top_n = int(deg_params.get("marker_top_n"))
+
+top_n_input = w_text_input(
+    key="cluster_marker_heatmap_top_n",
+    label="Top genes per cluster",
+    default=str(default_top_n),
+    appearance={"help_text": "Number of top DEG rows per cluster to include."},
 )
 
-w_row(items=[hm_palette, show_table])
+pval_options = ["pvals"]
+if deg_key in adata_g.uns:
+    candidate_degs = cluster_marker_to_dataframe(adata_g.uns[deg_key], deg_key)
+    if "pvals_adj" in candidate_degs.columns:
+        pval_options.append("pvals_adj")
+else:
+    candidate_degs = None
 
-heatmap_params = adata_g.uns.get(heatmap_params_key, {})
-legend_title = "Z-score"
-title = "Cluster Marker Heatmap"
+pval_col_select = w_select(
+    key="cluster_marker_heatmap_pval_col",
+    label="P-value column",
+    default="pvals",
+    options=tuple(pval_options),
+)
 
-if isinstance(heatmap_params, dict):
-    marker_top_n = heatmap_params.get("marker_top_n")
-    values_label = heatmap_params.get("values")
-    if marker_top_n is not None:
-        title = f"Top {marker_top_n} Marker Genes per Cluster"
-    if isinstance(values_label, str) and values_label:
+pval_cutoff_input = w_text_input(
+    key="cluster_marker_heatmap_pval_cutoff",
+    label="P-value cutoff",
+    default="0.05",
+)
+
+log2fc_cutoff_input = w_text_input(
+    key="cluster_marker_heatmap_log2fc_cutoff",
+    label="Log2FC cutoff",
+    default="0.25",
+)
+
+order_select = w_select(
+    key="cluster_marker_heatmap_order",
+    label="Cluster order",
+    default="DEG similarity",
+    options=("DEG similarity", "numeric", "user-selected"),
+)
+
+default_order = ""
+if "cluster" in adata_g.obs:
+    default_order = ", ".join(
+        sorted(
+            adata_g.obs["cluster"].astype(str).unique().tolist(),
+            key=cluster_marker_sort_key,
+        )
+    )
+
+user_order_input = w_text_input(
+    key="cluster_marker_heatmap_user_order",
+    label="User cluster order",
+    default=default_order,
+    appearance={
+        "help_text": "Comma-separated cluster order. Used only when Cluster order is user-selected."
+    },
+)
+
+w_row(items=[hm_palette, top_n_input, pval_col_select])
+w_row(items=[pval_cutoff_input, log2fc_cutoff_input])
+w_row(items=[user_order_input, order_select])
+
+try:
+    if candidate_degs is not None:
+        top_n = parse_cluster_marker_int(
+            top_n_input.value,
+            default_top_n,
+            "Top genes per cluster",
+        )
+        pval_cutoff = parse_cluster_marker_float(
+            pval_cutoff_input.value,
+            0.05,
+            "P-value cutoff",
+            minimum=0.0,
+        )
+        log2fc_cutoff = parse_cluster_marker_float(
+            log2fc_cutoff_input.value,
+            0.25,
+            "Log2FC cutoff",
+        )
+        marker_heatmap_df = compute_cluster_marker_heatmap_from_degs(
+            adata_g,
+            candidate_degs,
+            top_n=top_n,
+            pval_col=pval_col_select.value,
+            pval_cutoff=pval_cutoff,
+            log2fc_cutoff=log2fc_cutoff,
+            order_mode=order_select.value,
+            user_order=user_order_input.value,
+            deg_key=deg_key,
+        )
+        title = f"Top {top_n} Marker Genes per Cluster"
+    else:
+        marker_heatmap_df = get_cached_cluster_marker_heatmap(
+            adata_g,
+            heatmap_key=heatmap_key,
+        )
+        if marker_heatmap_df is None:
+            raise ValueError(
+                f"No dynamic DEG table (`adata.uns['{deg_key}']`) or cached heatmap "
+                f"(`adata.uns['{heatmap_key}']`) was found."
+            )
         w_text_output(
-            content=f"Values: {values_label}",
+            content=(
+                f"Differential stats not found, defauling to cached heatmap. "
+                f"Some options will not work. "
+            ),
+            appearance={"message_box": "warning"}
+        )
+        title = "Cached Cluster Marker Heatmap"
+except Exception as e:
+    w_text_output(
+        content=str(e),
+        appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+    exit()
+
+if isinstance(deg_params, dict) and deg_params:
+    fixed_filters = []
+    if deg_params.get("excluded_prefixes") is not None:
+        fixed_filters.append(f"excluded prefixes: {deg_params.get('excluded_prefixes')}")
+    if deg_params.get("expression_layer") is not None:
+        fixed_filters.append(f"expression layer: {deg_params.get('expression_layer')}")
+    if fixed_filters:
+        w_text_output(
+            content="Stored DEG table filters: " + "; ".join(fixed_filters),
             appearance={"message_box": "info"}
         )
 
@@ -126,7 +204,7 @@ cluster_marker_heatmap.update_layout(
     xaxis_title="Marker gene",
     yaxis_title="Cluster",
     coloraxis_colorbar=dict(
-        title=legend_title,
+        title="Z-score",
         title_side="right"
     )
 )
@@ -145,10 +223,9 @@ cluster_marker_heatmap.update_yaxes(
     ticktext=marker_heatmap_df.index.tolist()
 )
 
-w_plot(source=cluster_marker_heatmap)
+cluster_hm_plot = w_plot(source=cluster_marker_heatmap)
 
-if show_table.value:
-    w_table(
-        label="Cluster marker heatmap data",
-        source=marker_heatmap_df,
-    )
+cluster_hm_table = w_table(
+    label="Cluster marker heatmap data",
+    source=marker_heatmap_df,
+)

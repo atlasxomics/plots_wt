@@ -4,9 +4,13 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import scanpy as sc
+import scipy.sparse as sp
+
 
 from anndata import AnnData
 from pathlib import Path
+from scipy.cluster.hierarchy import leaves_list, linkage
+from scipy.spatial.distance import pdist
 from typing import List
 
 from lplots import palettes, submit_widget_state
@@ -157,15 +161,24 @@ def drop_obs_column(adata_objects, col_to_drop="orig.ident"):
             adata_obj.obs = adata_obj.obs.drop(columns=[col_to_drop])
 
 
+def empty_notebook_palettes():
+    return {"categorical": [], "continuous": []}
+
+
 async def get_notebook_palettes():
     try:
         palette_data = await palettes.get()
+    except RuntimeError as e:
+        if "Event loop is closed" in str(e):
+            return empty_notebook_palettes()
+        print(f"Unable to load notebook palettes: {e}")
+        return empty_notebook_palettes()
     except Exception as e:
         print(f"Unable to load notebook palettes: {e}")
-        return {"categorical": [], "continuous": []}
+        return empty_notebook_palettes()
 
     if not isinstance(palette_data, dict):
-        return {"categorical": [], "continuous": []}
+        return empty_notebook_palettes()
 
     return {
         kind: [
@@ -579,3 +592,187 @@ def sort_group_categories(values):
         return [value for value, _ in sorted_pairs]
 
     return sorted(map(str, values))
+
+
+def cluster_marker_to_dataframe(raw_value, key):
+    """Convert an AnnData `.uns` value into a DataFrame."""
+    if isinstance(raw_value, pd.DataFrame):
+        return raw_value.copy()
+    try:
+        return pd.DataFrame(raw_value)
+    except Exception as err:
+        raise ValueError(f"Could not convert `adata.uns['{key}']` to a table: {err}")
+
+
+def parse_cluster_marker_int(value, default, label, minimum=1):
+    """Parse an integer plotting control value."""
+    try:
+        parsed = int(str(value).strip())
+    except Exception:
+        raise ValueError(f"{label} must be an integer.")
+    if parsed < minimum:
+        raise ValueError(f"{label} must be at least {minimum}.")
+    return parsed
+
+
+def parse_cluster_marker_float(value, default, label, minimum=None):
+    """Parse a floating point plotting control value."""
+    raw = str(value).strip()
+    if raw == "":
+        return default
+    try:
+        parsed = float(raw)
+    except Exception:
+        raise ValueError(f"{label} must be a number.")
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{label} must be at least {minimum}.")
+    return parsed
+
+
+def cluster_marker_sort_key(cluster):
+    """Sort cluster labels numerically when possible, otherwise alphabetically."""
+    cluster_str = str(cluster)
+    return (0, int(cluster_str)) if cluster_str.isdigit() else (1, cluster_str)
+
+
+def cluster_marker_zscore_heatmap(values_df):
+    """Z-score heatmap columns and clip to the marker heatmap display range."""
+    return values_df.apply(
+        lambda col: (col - col.mean()) / (col.std() + 1e-9),
+        axis=0,
+    ).clip(-3, 3)
+
+
+def get_cached_cluster_marker_heatmap(
+    adata,
+    heatmap_key="cluster_marker_heatmap",
+):
+    """Read a precomputed cluster marker heatmap from AnnData if present."""
+    if heatmap_key not in adata.uns:
+        return None
+    heatmap_df = cluster_marker_to_dataframe(adata.uns[heatmap_key], heatmap_key)
+    heatmap_df = heatmap_df.apply(pd.to_numeric, errors="coerce")
+    heatmap_df = heatmap_df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    heatmap_df.index = heatmap_df.index.map(str)
+    heatmap_df.columns = heatmap_df.columns.map(str)
+    if heatmap_df.empty:
+        return None
+    return heatmap_df
+
+
+def compute_cluster_marker_heatmap_from_degs(
+    adata,
+    deg_df,
+    top_n,
+    pval_col,
+    pval_cutoff,
+    log2fc_cutoff,
+    order_mode,
+    user_order,
+    deg_key="cluster_marker_degs",
+    groupby="cluster",
+    layer="log1p",
+):
+    """Build the dynamic marker heatmap from stored cluster DEG results."""
+    required_cols = {groupby, "names", "logfoldchanges", pval_col}
+    missing = sorted(required_cols - set(deg_df.columns))
+    if missing:
+        raise ValueError(f"`adata.uns['{deg_key}']` is missing columns: {missing}.")
+    if layer not in adata.layers:
+        raise ValueError(f"This plot requires `adata.layers['{layer}']`.")
+    if groupby not in adata.obs:
+        raise ValueError(f"This plot requires `adata.obs['{groupby}']`.")
+
+    deg_df = deg_df.copy()
+    deg_df[groupby] = deg_df[groupby].astype(str)
+    deg_df["names"] = deg_df["names"].astype(str)
+    deg_df["logfoldchanges"] = pd.to_numeric(
+        deg_df["logfoldchanges"],
+        errors="coerce",
+    )
+    deg_df[pval_col] = pd.to_numeric(deg_df[pval_col], errors="coerce")
+    deg_df = deg_df.dropna(subset=[groupby, "names", "logfoldchanges", pval_col])
+    deg_df = deg_df[
+        (deg_df[pval_col] <= pval_cutoff)
+        & (deg_df["logfoldchanges"] >= log2fc_cutoff)
+    ]
+
+    if deg_df.empty:
+        raise ValueError("No DEGs remain after the selected filters.")
+
+    clusters = sorted(deg_df[groupby].unique().tolist(), key=cluster_marker_sort_key)
+    top_genes_per_cluster = {}
+    for cluster in clusters:
+        cluster_df = deg_df[deg_df[groupby] == cluster].head(top_n)
+        top_genes_per_cluster[cluster] = cluster_df["names"].tolist()
+
+    seen = set()
+    all_top_genes = []
+    for cluster in clusters:
+        for gene in top_genes_per_cluster[cluster]:
+            if gene not in seen:
+                all_top_genes.append(gene)
+                seen.add(gene)
+
+    if len(all_top_genes) == 0:
+        raise ValueError("No marker genes are available for the selected filters.")
+
+    gene_idx = adata.var_names.get_indexer(all_top_genes)
+    valid = gene_idx >= 0
+    genes = [gene for gene, keep in zip(all_top_genes, valid) if keep]
+    gene_idx = gene_idx[valid]
+    if len(genes) == 0:
+        raise ValueError("None of the selected marker genes are present in `adata.var_names`.")
+
+    obs_clusters = adata.obs[groupby].astype(str)
+    X = adata.layers[layer]
+    mean_expr = pd.DataFrame(index=clusters, columns=genes, dtype=float)
+    for cluster in clusters:
+        mask = obs_clusters == cluster
+        if int(mask.sum()) == 0:
+            mean_expr.loc[cluster] = np.nan
+            continue
+        sub = X[mask.to_numpy(), :][:, gene_idx]
+        if sp.issparse(sub):
+            sub = sub.toarray()
+        mean_expr.loc[cluster] = np.asarray(sub).mean(axis=0)
+
+    mean_expr = mean_expr.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    if mean_expr.empty:
+        raise ValueError("Unable to compute mean expression for the selected genes.")
+
+    clusters = mean_expr.index.tolist()
+    if order_mode == "DEG similarity" and len(clusters) > 1:
+        values = mean_expr.to_numpy(dtype=float)
+        scaled = (values - values.mean(axis=0)) / (values.std(axis=0) + 1e-9)
+        cluster_order = [
+            clusters[i]
+            for i in leaves_list(linkage(pdist(scaled), method="ward"))
+        ]
+    elif order_mode == "user-selected":
+        requested = [
+            item.strip()
+            for item in str(user_order).replace(";", ",").split(",")
+            if item.strip()
+        ]
+        requested = [cluster for cluster in requested if cluster in clusters]
+        cluster_order = requested + [
+            cluster for cluster in clusters if cluster not in requested
+        ]
+    else:
+        cluster_order = sorted(clusters, key=cluster_marker_sort_key)
+
+    valid_gene_set = set(mean_expr.columns)
+    seen_ordered = set()
+    ordered_genes = []
+    for cluster in cluster_order:
+        for gene in top_genes_per_cluster.get(cluster, []):
+            if gene in valid_gene_set and gene not in seen_ordered:
+                ordered_genes.append(gene)
+                seen_ordered.add(gene)
+
+    if len(ordered_genes) == 0:
+        raise ValueError("No ordered marker genes are available for the heatmap.")
+
+    heatmap_values = mean_expr.loc[cluster_order, ordered_genes].astype(float)
+    return cluster_marker_zscore_heatmap(heatmap_values)
