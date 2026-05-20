@@ -144,7 +144,7 @@ if data_path.value is not None:
     )
     submit_widget_state()
 
-  if "sample" in adata.obs and "spatial" in adata.obsm_keys() and "X_dataset" not in adata.obsm_keys():
+  if "sample" in adata.obs and "spatial" in adata.obsm_keys() and "spatial_offset" not in adata.obsm_keys():
       n_samples = adata.obs["sample"].nunique()
       if n_samples > 0:
         n_cols = min(2, max(1, n_samples))
