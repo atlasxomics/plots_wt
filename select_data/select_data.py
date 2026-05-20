@@ -155,7 +155,9 @@ if data_path.value is not None:
             n_rows=n_rows,
             n_cols=n_cols,
             tile_spacing=300,
-            new_obsm_key="X_dataset",
+            new_obsm_key="spatial_offset",
+            sample_order_mode="sample",
+            flipy=True
           )
         except Exception as e:
           w_text_output(
