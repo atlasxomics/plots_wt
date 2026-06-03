@@ -3,9 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import scanpy as sc
 import scipy.sparse as sp
-
 
 from anndata import AnnData
 from pathlib import Path
@@ -100,12 +98,18 @@ if "new_data_signal" not in globals():
     new_data_signal = Signal(False)
 if "choose_subset_signal" not in globals():
     choose_subset_signal = Signal(False)
-if "gene_score_done_signal" not in globals():
-    gene_score_done_signal = Signal(False)
 if "refresh_h5_signal" not in globals():
     refresh_h5_signal = Signal(False)
 
 na_keys = ['barcode', 'on_off', 'row', 'col', 'xcor', 'ycor', 'score']
+BACKED_H5AD_MODE = "r+"
+
+for _existing_adata in (globals().get("adata"), globals().get("adata_g")):
+    if _existing_adata is not None and getattr(_existing_adata, "isbacked", False):
+        try:
+            _existing_adata.file.close()
+        except Exception:
+            pass
 
 adata = None
 adata_g = None
@@ -141,10 +145,8 @@ def create_violin_data(adata, group_by, plot_data, data_type="obs"):
     if data_type == "obs":
         values = adata.obs[plot_data]
     elif data_type == "feature":
-        feature_matrix = adata[:, plot_data].X
-        if hasattr(feature_matrix, "toarray"):
-            feature_matrix = feature_matrix.toarray()
-        values = np.asarray(feature_matrix).ravel()
+        feature_idx = get_feature_index(adata, plot_data)
+        values = read_matrix_columns(adata, feature_idx).ravel()
     else:
         raise ValueError("data_type must be either 'obs' or 'feature'.")
 
@@ -152,6 +154,80 @@ def create_violin_data(adata, group_by, plot_data, data_type="obs"):
         "group": adata.obs[group_by],
         "value": values,
     })
+
+
+def close_backed_anndata(adata_obj):
+    """Close the H5AD file handle for a backed AnnData object."""
+    if adata_obj is None or not getattr(adata_obj, "isbacked", False):
+        return
+    try:
+        adata_obj.file.close()
+    except Exception:
+        pass
+
+
+def get_feature_index(adata, feature_name):
+    """Return the first var index matching a feature name."""
+    matches = np.flatnonzero(adata.var_names.astype(str) == str(feature_name))
+    if len(matches) == 0:
+        raise KeyError(feature_name)
+    return int(matches[0])
+
+
+def _is_h5py_dataset(matrix):
+    return matrix.__class__.__module__.startswith("h5py.")
+
+
+def _materialize_matrix(values):
+    if sp.issparse(values):
+        values = values.toarray()
+    return np.asarray(values)
+
+
+def get_matrix_source(adata, layer=None):
+    """Return a matrix-like source without materializing backed H5AD datasets."""
+    if layer is None or layer == "X":
+        return adata.X
+
+    if getattr(adata, "isbacked", False):
+        try:
+            h5_layer = adata.file._file["layers"][layer]
+            if hasattr(h5_layer, "keys"):
+                return anndata.io.sparse_dataset(h5_layer)
+            return h5_layer
+        except Exception:
+            pass
+
+    return adata.layers[layer]
+
+
+def has_matrix_layer(adata, layer):
+    if layer in adata.layers:
+        return True
+    if getattr(adata, "isbacked", False):
+        try:
+            return layer in adata.file._file.get("layers", {})
+        except Exception:
+            return False
+    return False
+
+
+def read_matrix_columns(adata, column_idx, layer=None):
+    """Read one or more matrix columns from X or a layer into memory."""
+    matrix = get_matrix_source(adata, layer=layer)
+    col_idx = np.atleast_1d(np.asarray(column_idx, dtype=int))
+
+    if len(col_idx) == 1:
+        values = matrix[:, [int(col_idx[0])]]
+    elif _is_h5py_dataset(matrix):
+        order = np.argsort(col_idx)
+        sorted_idx = col_idx[order]
+        values = matrix[:, sorted_idx]
+        values = values[:, np.argsort(order)]
+    else:
+        values = matrix[:, col_idx]
+
+    return _materialize_matrix(values)
 
 
 def drop_obs_column(adata_objects, col_to_drop="orig.ident"):
@@ -678,7 +754,7 @@ def compute_cluster_marker_heatmap_from_degs(
     missing = sorted(required_cols - set(deg_df.columns))
     if missing:
         raise ValueError(f"`adata.uns['{deg_key}']` is missing columns: {missing}.")
-    if layer not in adata.layers:
+    if not has_matrix_layer(adata, layer):
         raise ValueError(f"This plot requires `adata.layers['{layer}']`.")
     if groupby not in adata.obs:
         raise ValueError(f"This plot requires `adata.obs['{groupby}']`.")
@@ -725,14 +801,14 @@ def compute_cluster_marker_heatmap_from_degs(
         raise ValueError("None of the selected marker genes are present in `adata.var_names`.")
 
     obs_clusters = adata.obs[groupby].astype(str)
-    X = adata.layers[layer]
+    selected_expr = read_matrix_columns(adata, gene_idx, layer=layer)
     mean_expr = pd.DataFrame(index=clusters, columns=genes, dtype=float)
     for cluster in clusters:
         mask = obs_clusters == cluster
         if int(mask.sum()) == 0:
             mean_expr.loc[cluster] = np.nan
             continue
-        sub = X[mask.to_numpy(), :][:, gene_idx]
+        sub = selected_expr[mask.to_numpy(), :]
         if sp.issparse(sub):
             sub = sub.toarray()
         mean_expr.loc[cluster] = np.asarray(sub).mean(axis=0)

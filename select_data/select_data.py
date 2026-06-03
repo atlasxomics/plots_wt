@@ -7,7 +7,7 @@ w_text_output(content="""
 - Click the **Select File** icon and choose a `.h5ad` file from Latch Data.
 - The file should contain a valid AnnData object.
 - The notebook will use `sample`, `condition`, and `cluster` from `.obs` when present, but these columns are optional.
-- Loading large datasets into memory may take several minutes.
+- Large expression matrices are opened in AnnData backed mode instead of being loaded fully into memory.
 - If the notebook becomes frozen, try refreshing the browser tab or clicking the Run All In Tab button in the Run All dropdown menu.
 
 </details>
@@ -51,7 +51,7 @@ if data_path.value is not None:
   # Download file -------------------------------------------------------------
 
   w_text_output(
-    content="Downloading and reading the AnnData file; this may take a few minutes...",
+    content="Downloading and opening the AnnData file in backed mode; this may take a few minutes...",
     appearance={"message_box": "info"}
   )
   submit_widget_state()
@@ -69,7 +69,8 @@ if data_path.value is not None:
   # Load file -----------------------------------------------------------------
 
   try:
-    adata = sc.read_h5ad(local_adata_path)
+    close_backed_anndata(globals().get("adata"))
+    adata = anndata.read_h5ad(local_adata_path, backed=BACKED_H5AD_MODE)
   except Exception as e:
     w_text_output(
       content=f"Error loading AnnData object: {e}\nPlease check input file.",
@@ -169,24 +170,23 @@ if data_path.value is not None:
   drop_obs_column([adata], col_to_drop="orig.ident")
 
   w_text_output(
-    content=f"Data successfully loaded: {adata.n_obs} observations x {adata.n_vars} features.",
+    content=f"Data successfully opened in backed mode: {adata.n_obs} observations x {adata.n_vars} features.",
     appearance={"message_box": "success"}
   )
   submit_widget_state()
 
   choose_subset_signal(False)
-  gene_score_done_signal(False)
   refresh_h5_signal(False)
 
   new_data_signal(True)
 else:
   # Reset dynamic globals when no data path is selected.
+  close_backed_anndata(globals().get("adata"))
   adata = None
   adata_g = None
   adata_path = None
   available_features = []
   choose_subset_signal(False)
-  gene_score_done_signal(False)
   refresh_h5_signal(False)
 
   new_data_signal(True)
