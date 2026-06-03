@@ -39,8 +39,7 @@ numeric_metadata = [
   data for data in get_numeric_obs_keys(adata_g)
   if data in available_metadata
 ]
-feature_options = available_features if "available_features" in globals() else []
-violin_data_options = list(dict.fromkeys(numeric_metadata + feature_options))
+has_features = adata_g.n_vars > 0
 
 if not violin_groups:
   w_text_output(
@@ -50,7 +49,7 @@ if not violin_groups:
   submit_widget_state()
   exit()
 
-if not violin_data_options:
+if not numeric_metadata and not has_features:
   w_text_output(
     content="No numeric metadata columns or features are available to plot.",
     appearance={"message_box": "warning"}
@@ -58,15 +57,50 @@ if not violin_data_options:
   submit_widget_state()
   exit()
 
-violin_data = w_select(
-  label="data",
-  default=choose_default_option(violin_data_options, preferred="tsse"),
-  options=tuple(violin_data_options),
+data_source_options = []
+if numeric_metadata:
+  data_source_options.append("metadata")
+if has_features:
+  data_source_options.append("feature")
+
+violin_data_source = w_select(
+  label="data source",
+  default=choose_default_option(data_source_options, preferred="metadata"),
+  options=tuple(data_source_options),
   appearance={
-    "help_text": "Select values to plot.",
-    "description": "Metadata columns come from `.obs`; features come from `.var_names`."
+    "help_text": "Choose whether to plot obs metadata or a feature from `.X`."
   }
 )
+
+violin_metadata = None
+violin_feature = None
+if violin_data_source.value == "metadata":
+  if not numeric_metadata:
+    w_text_output(
+      content="No numeric metadata columns are available to plot.",
+      appearance={"message_box": "warning"}
+    )
+    submit_widget_state()
+    exit()
+  violin_metadata = w_select(
+    label="metadata",
+    default=choose_default_option(numeric_metadata, preferred="tsse"),
+    options=tuple(numeric_metadata),
+    appearance={
+      "detail": "numeric obs",
+      "help_text": "Select numeric observation metadata."
+    }
+  )
+else:
+  violin_feature = w_text_input(
+    label="feature",
+    key="violin_feature",
+    default="",
+    appearance={
+      "placeholder": "Enter feature name",
+      "help_text": "Type an exact `.var_names` feature name."
+    }
+  )
 
 violin_group_by = w_select(
   label="group",
@@ -90,17 +124,45 @@ violin_type = w_select(
     "help_text": "Use box to speed up large datasets."
   }
 )
-violin_row = w_row(items=[violin_data, violin_group_by, violin_type, categorical_palette])
+violin_max_points = w_text_input(
+  label="max plotted cells",
+  key="violin_max_points",
+  default=str(DEFAULT_VIOLIN_MAX_POINTS),
+  appearance={
+    "help_text": "Caps plotting data with group-stratified sampling."
+  }
+)
+
+data_widget = violin_metadata if violin_metadata is not None else violin_feature
+violin_row = w_row(items=[
+  violin_data_source,
+  data_widget,
+  violin_group_by,
+  violin_type,
+  violin_max_points,
+  categorical_palette
+])
 
 data_type = None
-if violin_data.value in numeric_metadata:
+plot_data = None
+if violin_data_source.value == "metadata" and violin_metadata is not None:
   data_type = "obs"
-elif violin_data.value in feature_options:
+  plot_data = violin_metadata.value
+elif violin_data_source.value == "feature" and violin_feature is not None:
   data_type = "feature"
+  plot_data = (violin_feature.value or "").strip()
 
-if not data_type:
+if not data_type or not plot_data:
   w_text_output(
-    content="Selected data not found in AnnData object...",
+    content="Select metadata or enter a feature name to plot.",
+    appearance={"message_box": "warning"}
+  )
+  submit_widget_state()
+  exit()
+
+if data_type == "feature" and plot_data not in adata_g.var_names:
+  w_text_output(
+    content=f"Feature `{plot_data}` was not found in `.var_names`.",
     appearance={"message_box": "warning"}
   )
   submit_widget_state()
@@ -112,18 +174,47 @@ if data_type is not None:
   group_col = violin_group_by.value
   
   try:
-      violin_df = create_violin_data(
-          v_adata, group_col, violin_data.value, data_type=data_type
+      max_points = parse_positive_int(
+          violin_max_points.value,
+          DEFAULT_VIOLIN_MAX_POINTS,
+          "Max plotted cells",
       )
-  except KeyError:
+      violin_obs_positions = stratified_obs_positions(
+          v_adata.obs[group_col].astype(str),
+          max_points=max_points,
+      )
+      violin_df = create_violin_data(
+          v_adata,
+          group_col,
+          plot_data,
+          data_type=data_type,
+          obs_positions=violin_obs_positions,
+      )
+  except KeyError as e:
       w_text_output(
           content=(
-              f"Could not find {group_col} in the AnnData object."
+              f"Could not find {e} in the AnnData object."
           ),
           appearance={"message_box": "warning"},
       )
       submit_widget_state()
       exit()
+  except ValueError as e:
+      w_text_output(
+          content=str(e),
+          appearance={"message_box": "warning"},
+      )
+      submit_widget_state()
+      exit()
+
+  if len(violin_obs_positions) < v_adata.n_obs:
+    w_text_output(
+      content=(
+        f"Plotting {len(violin_obs_positions):,} group-stratified cells "
+        f"from {v_adata.n_obs:,} total cells."
+      ),
+      appearance={"message_box": "info"}
+    )
 
   if violin_type.value == "box":
     violin_categories = sort_group_categories(violin_df['group'].unique().tolist())
@@ -173,9 +264,9 @@ if data_type is not None:
     exit()
 
   violin_fig.update_layout(
-      title=f"Distribution of {violin_data.value} by {violin_group_by.value}",
+      title=f"Distribution of {plot_data} by {violin_group_by.value}",
       xaxis_title=violin_group_by.value,
-      yaxis_title=violin_data.value,
+      yaxis_title=plot_data,
       plot_bgcolor='rgba(0,0,0,0)',
       showlegend=False
   )
@@ -197,7 +288,7 @@ if data_type is not None:
 
   if violin_data_button.value:
     violin_table = w_table(
-      label=f"Distribution of {violin_data.value} by {violin_group_by.value}",
+      label=f"Distribution of {plot_data} by {violin_group_by.value}",
       source=violin_df
     )
 

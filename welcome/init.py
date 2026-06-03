@@ -44,6 +44,7 @@ DEFAULT_CONTINUOUS_PALETTE = "PuBu_r"
 DEFAULT_CONTINUOUS_PALETTE_NAME = "Default Continuous Palette"
 MAX_DEFAULT_CATEGORIES = 30
 MAX_PLOT_CATEGORIES = 100
+DEFAULT_VIOLIN_MAX_POINTS = 20000
 OBS_ID_KEYWORDS = (
     "barcode",
     "barcodes",
@@ -140,18 +141,23 @@ def create_proportion_dataframe(
     return long_df
 
 
-def create_violin_data(adata, group_by, plot_data, data_type="obs"):
+def create_violin_data(adata, group_by, plot_data, data_type="obs", obs_positions=None):
     """Create a DataFrame for violin or box plots."""
+    if obs_positions is None:
+        obs_positions = np.arange(adata.n_obs)
+    else:
+        obs_positions = np.asarray(obs_positions, dtype=int)
+
     if data_type == "obs":
-        values = adata.obs[plot_data]
+        values = adata.obs.iloc[obs_positions][plot_data].to_numpy()
     elif data_type == "feature":
         feature_idx = get_feature_index(adata, plot_data)
-        values = read_matrix_columns(adata, feature_idx).ravel()
+        values = read_matrix_columns(adata, feature_idx, row_idx=obs_positions).ravel()
     else:
         raise ValueError("data_type must be either 'obs' or 'feature'.")
 
     return pd.DataFrame({
-        "group": adata.obs[group_by],
+        "group": adata.obs.iloc[obs_positions][group_by].to_numpy(),
         "value": values,
     })
 
@@ -212,13 +218,26 @@ def has_matrix_layer(adata, layer):
     return False
 
 
-def read_matrix_columns(adata, column_idx, layer=None):
+def read_matrix_columns(adata, column_idx, layer=None, row_idx=None):
     """Read one or more matrix columns from X or a layer into memory."""
     matrix = get_matrix_source(adata, layer=layer)
     col_idx = np.atleast_1d(np.asarray(column_idx, dtype=int))
+    if row_idx is not None:
+        row_idx = np.atleast_1d(np.asarray(row_idx, dtype=int))
 
-    if len(col_idx) == 1:
+    if len(col_idx) == 1 and row_idx is not None:
+        values = matrix[row_idx, int(col_idx[0])]
+    elif len(col_idx) == 1:
         values = matrix[:, [int(col_idx[0])]]
+    elif row_idx is not None and _is_h5py_dataset(matrix):
+        row_order = np.argsort(row_idx)
+        sorted_rows = row_idx[row_order]
+        col_order = np.argsort(col_idx)
+        sorted_cols = col_idx[col_order]
+        values = matrix[sorted_rows, :][:, sorted_cols]
+        values = values[np.argsort(row_order), :][:, np.argsort(col_order)]
+    elif row_idx is not None:
+        values = matrix[row_idx, :][:, col_idx]
     elif _is_h5py_dataset(matrix):
         order = np.argsort(col_idx)
         sorted_idx = col_idx[order]
@@ -228,6 +247,55 @@ def read_matrix_columns(adata, column_idx, layer=None):
         values = matrix[:, col_idx]
 
     return _materialize_matrix(values)
+
+
+def parse_positive_int(value, default, label):
+    """Parse a positive integer plotting control value."""
+    raw = str(value).strip()
+    if raw == "":
+        return default
+    try:
+        parsed = int(raw)
+    except Exception:
+        raise ValueError(f"{label} must be a positive integer.")
+    if parsed < 1:
+        raise ValueError(f"{label} must be a positive integer.")
+    return parsed
+
+
+def stratified_obs_positions(groups, max_points, random_seed=0):
+    """Return deterministic group-stratified obs positions for plotting."""
+    groups = pd.Series(groups).astype(object)
+    groups = groups.where(pd.notna(groups), "__missing__").astype(str).reset_index(drop=True)
+    n_obs = len(groups)
+    if n_obs <= max_points:
+        return np.arange(n_obs)
+
+    rng = np.random.default_rng(random_seed)
+    sampled = []
+    group_sizes = groups.value_counts(dropna=False)
+    target_by_group = np.floor(group_sizes / n_obs * max_points).astype(int)
+    target_by_group[target_by_group < 1] = 1
+
+    while int(target_by_group.sum()) > max_points:
+        largest = target_by_group.idxmax()
+        target_by_group.loc[largest] -= 1
+
+    remaining = max_points - int(target_by_group.sum())
+    if remaining > 0:
+        remainders = (group_sizes / n_obs * max_points) - target_by_group
+        for group in remainders.sort_values(ascending=False).index[:remaining]:
+            target_by_group.loc[group] += 1
+
+    for group, n_group in target_by_group.items():
+        positions = np.flatnonzero(groups.to_numpy() == group)
+        n_group = min(int(n_group), len(positions))
+        if n_group == len(positions):
+            sampled.extend(positions.tolist())
+        else:
+            sampled.extend(rng.choice(positions, size=n_group, replace=False).tolist())
+
+    return np.asarray(sorted(sampled), dtype=int)
 
 
 def drop_obs_column(adata_objects, col_to_drop="orig.ident"):

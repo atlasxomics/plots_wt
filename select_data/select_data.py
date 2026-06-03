@@ -110,8 +110,6 @@ if data_path.value is not None:
       if adata.obs[group].dtype != object:
           adata.obs[group] = adata.obs[group].astype(str)
 
-  available_features = list(adata.var_names)
-
   missing_recommended = [
     col for col in ["sample", "condition", "cluster"]
     if col not in adata.obs
@@ -185,7 +183,6 @@ else:
   adata = None
   adata_g = None
   adata_path = None
-  available_features = []
   choose_subset_signal(False)
   refresh_h5_signal(False)
 
