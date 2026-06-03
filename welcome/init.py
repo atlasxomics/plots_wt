@@ -100,8 +100,6 @@ if "new_data_signal" not in globals():
     new_data_signal = Signal(False)
 if "choose_subset_signal" not in globals():
     choose_subset_signal = Signal(False)
-if "gene_score_done_signal" not in globals():
-    gene_score_done_signal = Signal(False)
 if "refresh_h5_signal" not in globals():
     refresh_h5_signal = Signal(False)
 

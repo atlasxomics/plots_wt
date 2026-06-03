@@ -175,7 +175,6 @@ if data_path.value is not None:
   submit_widget_state()
 
   choose_subset_signal(False)
-  gene_score_done_signal(False)
   refresh_h5_signal(False)
 
   new_data_signal(True)
@@ -186,7 +185,6 @@ else:
   adata_path = None
   available_features = []
   choose_subset_signal(False)
-  gene_score_done_signal(False)
   refresh_h5_signal(False)
 
   new_data_signal(True)
