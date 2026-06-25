@@ -17,9 +17,10 @@ H5 Viewer Advanced Options
 </ul>
 """)
 
+spatial_layout_key = get_spatial_layout_key(adata_g)
 sample_layout_available = (
     "sample" in adata_g.obs
-    and "spatial" in adata_g.obsm_keys()
+    and spatial_layout_key is not None
 )
 
 sample_layout_button = None
@@ -31,7 +32,7 @@ if sample_layout_available:
     )
 else:
     w_text_output(
-        content="Spatial arrangement controls are unavailable because this AnnData object does not contain both `obs['sample']` and `obsm['spatial']`.",
+        content="Spatial arrangement controls are unavailable because this AnnData object does not contain `obs['sample']` plus either `obsm['spatial']` or `obsm['spatial_offset']`.",
         appearance={"message_box": "info"}
     )
 
@@ -219,6 +220,7 @@ if h5_button.value:
                       n_rows=n_rows,
                       n_cols=n_cols,
                       tile_spacing=spacing,
+                      spatial_key=spatial_layout_key,
                       flipy=flipy_val,
                       sample_order_mode=sort_val,
                       new_obsm_key=new_obsm

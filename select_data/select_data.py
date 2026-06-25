@@ -6,6 +6,8 @@ w_text_output(content="""
 **Loading data**
 - Click the **Select File** icon and choose a `.h5ad` file from Latch Data.
 - The file should contain a valid AnnData object.
+- For faster loading, select a reduced object such as `combined_sm.h5ad` when
+  one is available.
 - The notebook will use `sample`, `condition`, and `cluster` from `.obs` when present, but these columns are optional.
 - Loading large datasets into memory may take several minutes.
 - If the notebook becomes frozen, try refreshing the browser tab or clicking the Run All In Tab button in the Run All dropdown menu.
@@ -46,7 +48,18 @@ if data_path.value is not None:
       submit_widget_state()
       exit()
 
-  local_adata_path = Path(adata_filename)
+  local_adata_path = Path(adata_path.name())
+
+  if not adata_filename.endswith("_sm.h5ad"):
+    w_text_output(
+      content=(
+        f"You selected `{adata_filename}`. If a sibling reduced object exists "
+        f"(for example `{adata_filename[:-5]}_sm.h5ad`), selecting it will "
+        "usually load faster."
+      ),
+      appearance={"message_box": "info"}
+    )
+    submit_widget_state()
 
   # Download file -------------------------------------------------------------
 
@@ -144,7 +157,8 @@ if data_path.value is not None:
     )
     submit_widget_state()
 
-  if "sample" in adata.obs and "spatial" in adata.obsm_keys() and "spatial_offset" not in adata.obsm_keys():
+  spatial_layout_key = get_spatial_layout_key(adata)
+  if "sample" in adata.obs and spatial_layout_key is not None and "spatial_offset" not in adata.obsm_keys():
       n_samples = adata.obs["sample"].nunique()
       if n_samples > 0:
         n_cols = min(2, max(1, n_samples))
@@ -155,6 +169,7 @@ if data_path.value is not None:
             n_rows=n_rows,
             n_cols=n_cols,
             tile_spacing=300,
+            spatial_key=spatial_layout_key,
             new_obsm_key="spatial_offset",
             sample_order_mode="sample"
           )

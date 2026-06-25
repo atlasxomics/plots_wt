@@ -432,6 +432,22 @@ def choose_group_default(
     return options[0] if options else None
 
 
+def get_spatial_layout_key(
+    adata: anndata.AnnData,
+    preferred=("spatial", "spatial_offset"),
+):
+    """Return the first available spatial-like obsm key for layout operations."""
+    if adata is None:
+        return None
+
+    obsm_keys = set(adata.obsm_keys())
+    for key in preferred:
+        if key in obsm_keys:
+            return key
+
+    return None
+
+
 def process_matrix_layout(
     adata_all,
     n_rows: int,

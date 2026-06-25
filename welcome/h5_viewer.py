@@ -9,6 +9,7 @@ Once initialized, the viewer will display your project cells plotted in UMAP spa
 ## Navigating the Viewer
 - **Change coordinates:**
   - `X_umap`: UMAP coordinates
+  - `spatial_offset`: samples arranged in spatial layout, used by reduced `_sm` objects
   - `X_dataset`: samples arranged in spatial layout, when `sample` and `spatial` are available
   - `spatial`: raw spatial coordinates, when present
 - **Coloring cells:**
