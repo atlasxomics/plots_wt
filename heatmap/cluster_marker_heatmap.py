@@ -105,9 +105,10 @@ user_order_input = w_text_input(
     },
 )
 
-w_row(items=[hm_palette, top_n_input, pval_col_select])
-w_row(items=[pval_cutoff_input, log2fc_cutoff_input])
+w_row(items=[top_n_input])
+w_row(items=[pval_col_select, pval_cutoff_input, log2fc_cutoff_input])
 w_row(items=[user_order_input, order_select])
+w_row(items=[hm_palette])
 
 try:
     if candidate_degs is not None:
@@ -229,3 +230,4 @@ cluster_hm_table = w_table(
     label="Cluster marker heatmap data",
     source=marker_heatmap_df,
 )
+

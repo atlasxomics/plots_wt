@@ -692,8 +692,9 @@ def compute_cluster_marker_heatmap_from_degs(
     missing = sorted(required_cols - set(deg_df.columns))
     if missing:
         raise ValueError(f"`adata.uns['{deg_key}']` is missing columns: {missing}.")
-    if layer not in adata.layers:
-        raise ValueError(f"This plot requires `adata.layers['{layer}']`.")
+    # Reduced objects may not carry layers; in that case `.X` is expected to
+    # hold log1p-normalized expression, so fall back to it when the layer is absent.
+    use_layer = layer in adata.layers
     if groupby not in adata.obs:
         raise ValueError(f"This plot requires `adata.obs['{groupby}']`.")
 
@@ -739,7 +740,7 @@ def compute_cluster_marker_heatmap_from_degs(
         raise ValueError("None of the selected marker genes are present in `adata.var_names`.")
 
     obs_clusters = adata.obs[groupby].astype(str)
-    X = adata.layers[layer]
+    X = adata.layers[layer] if use_layer else adata.X
     mean_expr = pd.DataFrame(index=clusters, columns=genes, dtype=float)
     for cluster in clusters:
         mask = obs_clusters == cluster
