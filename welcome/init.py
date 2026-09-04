@@ -3,15 +3,17 @@ import math
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import scanpy as sc
 import scipy.sparse as sp
 
 
 from anndata import AnnData
 from pathlib import Path
+from plotly.subplots import make_subplots
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import pdist
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from lplots import palettes, submit_widget_state
 from lplots.reactive import Signal
@@ -606,6 +608,269 @@ def sort_group_categories(values):
         return [value for value, _ in sorted_pairs]
 
     return sorted(map(str, values))
+
+
+def normalize_plotly_colorscale(colorscale):
+    """Convert a simple list of colors into Plotly's positioned format."""
+    if isinstance(colorscale, list) and colorscale:
+        if isinstance(colorscale[0], str):
+            if len(colorscale) == 1:
+                return [[0, colorscale[0]], [1, colorscale[0]]]
+            return [
+                [i / (len(colorscale) - 1), color]
+                for i, color in enumerate(colorscale)
+            ]
+    return colorscale
+
+
+def _ordered_neighborhood_data(adata, uns_key, mode, key="cluster"):
+    """Return an enrichment matrix and labels in stable display order."""
+    if key not in adata.obs:
+        raise ValueError(f"Key '{key}' not found in adata.obs.")
+    if uns_key not in adata.uns:
+        raise ValueError(f"Key '{uns_key}' not found in adata.uns.")
+    if mode not in adata.uns[uns_key]:
+        raise ValueError(f"Mode '{mode}' not found in adata.uns['{uns_key}'].")
+
+    series = adata.obs[key]
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        categories = [str(value) for value in series.cat.categories]
+    else:
+        categories = [str(value) for value in pd.unique(series.dropna())]
+
+    matrix = np.asarray(adata.uns[uns_key][mode], dtype=float)
+    expected_shape = (len(categories), len(categories))
+    if matrix.shape != expected_shape:
+        raise ValueError(
+            f"adata.uns['{uns_key}']['{mode}'] has shape {matrix.shape}, "
+            f"but {len(categories)} cluster categories were found."
+        )
+
+    ordered_labels = sort_group_categories(categories)
+    positions = {label: i for i, label in enumerate(categories)}
+    order = [positions[label] for label in ordered_labels]
+    return matrix[np.ix_(order, order)], ordered_labels
+
+
+def _finite_neighborhood_bounds(matrices, vmin=None, vmax=None):
+    """Fill missing heatmap bounds from finite values in one or more matrices."""
+    finite_values = [
+        matrix[np.isfinite(matrix)]
+        for matrix in matrices
+        if np.asarray(matrix).size
+    ]
+    finite_values = [values for values in finite_values if values.size]
+    if vmin is None:
+        vmin = min(float(values.min()) for values in finite_values) if finite_values else 0.0
+    if vmax is None:
+        vmax = max(float(values.max()) for values in finite_values) if finite_values else 0.0
+    if vmin == vmax:
+        padding = max(abs(vmin) * 0.05, 1.0)
+        vmin -= padding
+        vmax += padding
+    return vmin, vmax
+
+
+def plotly_heatmap(
+    adata: AnnData,
+    uns_key: str,
+    key: str = "cluster",
+    title: str = "",
+    colorscale: Any = "RdBu_r",
+    width: Optional[int] = 700,
+    height: Optional[int] = 700,
+    mode: str = "zscore",
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    **kwargs: Any,
+):
+    """Build one neighborhood-enrichment heatmap and its labeled table."""
+    data, labels = _ordered_neighborhood_data(adata, uns_key, mode, key)
+    vmin, vmax = _finite_neighborhood_bounds([data], vmin, vmax)
+    data_table = pd.DataFrame(data, index=labels, columns=labels)
+    data_table.index.name = f"{key} (row)"
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=data,
+            x=labels,
+            y=labels,
+            colorscale=normalize_plotly_colorscale(colorscale),
+            showscale=True,
+            hoverongaps=False,
+            zmin=vmin,
+            zmax=vmax,
+            colorbar=dict(title=mode, tickformat=".2f", len=0.9),
+            **kwargs,
+        )
+    )
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor="center", yanchor="top"),
+        width=width,
+        height=height,
+        showlegend=False,
+        xaxis=dict(showgrid=False, side="bottom", title="neighbor cluster"),
+        yaxis=dict(showgrid=False, autorange="reversed", title="focal cluster"),
+    )
+    return fig, data_table
+
+
+def plot_neighborhood_groups(
+    group_adatas: Dict[str, anndata.AnnData],
+    title: str,
+    key: str = "cluster",
+    uns_key: Optional[str] = None,
+    mode: str = "zscore",
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    colorscale: Any = None,
+):
+    """Build faceted neighborhood heatmaps with a shared color range."""
+    groups = sort_group_categories([str(group) for group in group_adatas])
+    if not groups:
+        raise ValueError("No neighborhood subgroups are available to plot.")
+    if uns_key is None:
+        raise ValueError("An uns_key is required for neighborhood plots.")
+
+    matrices = {}
+    labels_by_group = {}
+    for group in groups:
+        data, labels = _ordered_neighborhood_data(
+            group_adatas[group], uns_key, mode, key
+        )
+        matrices[group] = data
+        labels_by_group[group] = labels
+
+    vmin, vmax = _finite_neighborhood_bounds(matrices.values(), vmin, vmax)
+    if colorscale is None:
+        if vmin >= 0:
+            colorscale = [[0, "white"], [1, "red"]]
+        elif vmax <= 0:
+            colorscale = [[0, "blue"], [1, "white"]]
+        else:
+            zero_position = abs(vmin) / (abs(vmin) + abs(vmax))
+            colorscale = [[0, "blue"], [zero_position, "white"], [1, "red"]]
+    colorscale = normalize_plotly_colorscale(colorscale)
+
+    num_groups = len(groups)
+    if num_groups <= 2:
+        num_cols = num_groups
+        base_cell_width, base_cell_height = 550, 506
+    elif num_groups <= 4:
+        num_cols = 2
+        base_cell_width, base_cell_height = 550, 506
+    elif num_groups <= 9:
+        num_cols = 3
+        base_cell_width, base_cell_height = 400, 360
+    else:
+        num_cols = 4
+        base_cell_width, base_cell_height = 336, 302
+    num_rows = math.ceil(num_groups / num_cols)
+
+    fig = make_subplots(
+        rows=num_rows,
+        cols=num_cols,
+        subplot_titles=groups,
+        horizontal_spacing=0.05,
+        vertical_spacing=0.05,
+    )
+    tables = {}
+    for i, group in enumerate(groups):
+        row, col = i // num_cols + 1, i % num_cols + 1
+        data = matrices[group]
+        labels = labels_by_group[group]
+        tables[group] = pd.DataFrame(data, index=labels, columns=labels)
+        fig.add_trace(
+            go.Heatmap(
+                z=data,
+                x=labels,
+                y=labels,
+                colorscale=colorscale,
+                showscale=(i == 0),
+                hoverongaps=False,
+                zmin=vmin,
+                zmax=vmax,
+                colorbar=(
+                    dict(title=mode, tickformat=".2f", len=0.9, x=1.02)
+                    if i == 0 else None
+                ),
+            ),
+            row=row,
+            col=col,
+        )
+        fig.update_xaxes(showgrid=False, side="bottom", tickfont=dict(size=10), row=row, col=col)
+        fig.update_yaxes(showgrid=False, autorange="reversed", tickfont=dict(size=10), row=row, col=col)
+
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor="center", font=dict(size=18)),
+        plot_bgcolor="rgba(0,0,0,0)",
+        autosize=False,
+        width=max(base_cell_width * num_cols, 1000 if num_groups > 16 else 0),
+        height=max(base_cell_height * num_rows, 900 if num_groups > 16 else 0),
+        margin=dict(l=80, r=80, t=100, b=40),
+        showlegend=False,
+    )
+    for annotation in fig.layout.annotations:
+        annotation.font.size = 14
+
+    combined_data = pd.concat(tables, axis=1)
+    combined_data.index.name = f"{key} (row)"
+    return fig, combined_data
+
+
+def squidpy_analysis(
+    adata: anndata.AnnData,
+    cluster_key: str = "cluster",
+    sample_key: Optional[str] = None,
+    spatial_key: Optional[str] = None,
+) -> anndata.AnnData:
+    """Compute neighborhood enrichment when workflow results are unavailable."""
+    from squidpy.gr import nhood_enrichment, spatial_neighbors
+
+    if cluster_key not in adata.obs:
+        raise KeyError(f"AnnData is missing `{cluster_key}` in `.obs`.")
+    if spatial_key is None:
+        spatial_key = get_spatial_layout_key(adata)
+    if spatial_key is None:
+        raise KeyError(
+            "Spatial coordinates were not found in `.obsm`; expected "
+            "`spatial` or `spatial_offset`."
+        )
+    if sample_key not in adata.obs:
+        sample_key = None
+
+    for obs_key in (cluster_key, sample_key):
+        if obs_key is None:
+            continue
+        if isinstance(adata.obs[obs_key].dtype, pd.CategoricalDtype):
+            adata.obs[obs_key] = adata.obs[obs_key].cat.remove_unused_categories()
+        else:
+            adata.obs[obs_key] = adata.obs[obs_key].astype("category")
+
+    categories = adata.obs[cluster_key].cat.categories
+    if len(categories) < 2:
+        shape = (len(categories), len(categories))
+        adata.uns[f"{cluster_key}_nhood_enrichment"] = {
+            "zscore": np.zeros(shape, dtype=float),
+            "count": np.zeros(shape, dtype=float),
+        }
+        return adata
+
+    spatial_neighbors(
+        adata,
+        spatial_key=spatial_key,
+        coord_type="grid",
+        n_neighs=4,
+        n_rings=1,
+        library_key=sample_key,
+    )
+    nhood_enrichment(
+        adata,
+        cluster_key=cluster_key,
+        library_key=sample_key,
+        seed=42,
+    )
+    return adata
 
 
 def cluster_marker_to_dataframe(raw_value, key):

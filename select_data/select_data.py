@@ -119,10 +119,15 @@ if data_path.value is not None:
       adata.obs[col] = pd.to_numeric(adata.obs[col], errors="ignore")
 
   for group in get_groups(adata):
-      if adata.obs[group].dtype != object:
+      if isinstance(adata.obs[group].dtype, pd.CategoricalDtype):
+          # Neighborhood matrices follow the stored categorical order. Keep
+          # that order while normalizing labels to strings for plot controls.
+          adata.obs[group] = adata.obs[group].cat.rename_categories(str)
+      elif adata.obs[group].dtype != object:
           adata.obs[group] = adata.obs[group].astype(str)
 
   available_features = list(adata.var_names)
+  filtered_groups = {}
 
   missing_recommended = [
     col for col in ["sample", "condition", "cluster"]
@@ -199,6 +204,7 @@ else:
   adata_g = None
   adata_path = None
   available_features = []
+  filtered_groups = {}
   choose_subset_signal(False)
   refresh_h5_signal(False)
 
